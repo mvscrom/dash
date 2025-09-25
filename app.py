@@ -102,6 +102,25 @@ def convert_raw_to_pressure(grd_id, raw_value):
     
     return round(presion_bar, 2)
 
+def find_closest_pump_state(target_timestamp, reportes_data):
+    """
+    Encuentra el estado de las bombas más cercano al timestamp dado.
+    Busca hacia atrás en el tiempo para encontrar el último estado conocido.
+    """
+    if not reportes_data:
+        return None
+    
+    # Ordenar reportes por fecha (más reciente primero)
+    sorted_reportes = sorted(reportes_data, key=lambda x: x['fecha'], reverse=True)
+    
+    # Buscar el reporte más reciente que sea anterior o igual al timestamp objetivo
+    for report in sorted_reportes:
+        if report['fecha'] <= target_timestamp:
+            return report
+    
+    # Si no encontramos ninguno anterior, devolver el más antiguo
+    return sorted_reportes[-1] if sorted_reportes else None
+
 
 @app.route('/')
 def index():
@@ -221,7 +240,11 @@ def get_historial_data():
         if not historial_data:
             return jsonify([])
 
-        # 2. Obtener datos de reportes (Bombas) - Usamos una columna llamada 'fecha'
+        # 2. Obtener datos de reportes (Bombas) con rango ampliado para asegurar cobertura
+        # Ampliamos el rango hacia atrás para encontrar el último estado conocido
+        extended_start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d') - datetime.timedelta(days=7)
+        extended_start_date_str = extended_start_date.strftime('%Y-%m-%d')
+        
         reportes_query = """
         SELECT
             fecha,
@@ -231,30 +254,53 @@ def get_historial_data():
         WHERE grd_id = %s AND fecha BETWEEN %s AND %s
         ORDER BY fecha ASC;
         """
-        cursor.execute(reportes_query, (grd_id, start_date, end_date_time))
+        cursor.execute(reportes_query, (grd_id, extended_start_date_str, end_date_time))
         reportes_data = cursor.fetchall()
+        
+        # Debug: Mostrar información sobre los datos obtenidos
+        print(f"DEBUG: GRD {grd_id} - Registros historial: {len(historial_data)}, Registros reportes: {len(reportes_data)}")
+        if reportes_data:
+            print(f"DEBUG: Primer reporte: {reportes_data[0]}")
+            print(f"DEBUG: Último reporte: {reportes_data[-1]}")
+        if historial_data:
+            print(f"DEBUG: Primer historial: {historial_data[0]['timestamp']}")
+            print(f"DEBUG: Último historial: {historial_data[-1]['timestamp']}")
 
-        # 3. Combinar los datos: Iterar sobre historial y asignar el último estado de bomba conocido (FIX para bombas)
+        # 3. Combinar los datos: Usar la nueva función auxiliar para encontrar estados de bomba
         combined_data = []
-        reporte_index = 0
-        current_bombas = {'i1': None, 'i2': None}
-
+        
         for h_row in historial_data:
             h_timestamp = h_row['timestamp']
             
-            # Avanzar en los reportes hasta encontrar el más reciente antes o igual a h_timestamp
-            # En MySQL, la columna 'fecha' del reporte se compara con el 'timestamp' del historial
-            while reporte_index < len(reportes_data) and reportes_data[reporte_index]['fecha'] <= h_timestamp:
-                current_bombas['i1'] = reportes_data[reporte_index]['i1']
-                current_bombas['i2'] = reportes_data[reporte_index]['i2']
-                reporte_index += 1
+            # Encontrar el estado de bomba más cercano
+            closest_report = find_closest_pump_state(h_timestamp, reportes_data)
             
             nivel_convertido = convert_raw_to_level(grd_id, h_row['nivel_agua_raw'])
             presion_convertida = convert_raw_to_pressure(grd_id, h_row['presion_raw'])
             
-            # Usamos la conversión robusta para asegurar que los valores 1/0 de la BD funcionen
-            bomba1_status = 'Encendida' if current_bombas.get('i1') and int(current_bombas.get('i1')) == 1 else 'Apagada'
-            bomba2_status = 'Encendida' if current_bombas.get('i2') and int(current_bombas.get('i2')) == 1 else 'Apagada'
+            # Determinar el estado de las bombas
+            if closest_report:
+                # Conversión robusta: manejar diferentes tipos de datos (int, str, None)
+                try:
+                    i1_val = closest_report.get('i1')
+                    i2_val = closest_report.get('i2')
+                    
+                    bomba1_status = 'Encendida' if i1_val is not None and int(i1_val) == 1 else 'Apagada'
+                    bomba2_status = 'Encendida' if i2_val is not None and int(i2_val) == 1 else 'Apagada'
+                    
+                    # Debug para el primer registro
+                    if len(combined_data) == 0:
+                        print(f"DEBUG: Primer registro - i1: {i1_val}, i2: {i2_val}, Bomba1: {bomba1_status}, Bomba2: {bomba2_status}")
+                        
+                except (ValueError, TypeError) as e:
+                    print(f"ERROR convirtiendo valores de bomba: {e}")
+                    bomba1_status = 'Error'
+                    bomba2_status = 'Error'
+            else:
+                bomba1_status = 'Sin Datos'
+                bomba2_status = 'Sin Datos'
+                if len(combined_data) == 0:  # Solo mostrar para el primer registro
+                    print(f"ADVERTENCIA: No se encontró reporte de bombas para GRD {grd_id} en timestamp {h_timestamp}")
 
             combined_data.append({
                 'grd_id': grd_id,
