@@ -43,6 +43,17 @@ def get_db_connection():
         print(f"ERROR: No se pudo conectar a la base de datos: {err}")
         return None
 
+
+def is_bomba_on(value):
+    """Devuelve True si el valor representa 'encendida' (1). Acepta int/str/None.
+
+    Esta función es robusta frente a valores '0' como string, None, etc.
+    """
+    try:
+        return int(value) == 1
+    except (TypeError, ValueError):
+        return False
+
 def convert_raw_to_level(grd_id, raw_value):
     """Convierte el valor RAW a nivel en metros, porcentaje y evalúa alarmas."""
     if raw_value is None or raw_value < RAW_MIN_NIVEL:
@@ -158,11 +169,11 @@ def get_grd_data():
             nivel_convertido = convert_raw_to_level(grd_id, row['nivel_agua_raw'])
             presion_convertida = convert_raw_to_pressure(grd_id, row['presion_raw'])
             
-            bombas = bombas_por_grd_id.get(grd_id, {'i1': None, 'i2': None})
+        bombas = bombas_por_grd_id.get(grd_id, {'i1': None, 'i2': None})
             
-            # Conversión a string robusta
-            bomba1_status = 'Encendida' if bombas.get('i1') and int(bombas.get('i1')) == 1 else 'Apagada'
-            bomba2_status = 'Encendida' if bombas.get('i2') and int(bombas.get('i2')) == 1 else 'Apagada'
+            # Conversión robusta
+            bomba1_status = 'Encendida' if is_bomba_on(bombas.get('i1')) else 'Apagada'
+            bomba2_status = 'Encendida' if is_bomba_on(bombas.get('i2')) else 'Apagada'
 
             formatted_data.append({
                 'grd_id': grd_id,
@@ -221,7 +232,7 @@ def get_historial_data():
         if not historial_data:
             return jsonify([])
 
-        # 2. Obtener datos de reportes (Bombas) - Usamos una columna llamada 'fecha'
+        # 2. Obtener datos de reportes (Bombas) dentro del rango
         reportes_query = """
         SELECT
             fecha,
@@ -234,10 +245,25 @@ def get_historial_data():
         cursor.execute(reportes_query, (grd_id, start_date, end_date_time))
         reportes_data = cursor.fetchall()
 
+        # 2.b Semilla: último estado de bombas previo al primer dato de historial
+        seed_query = """
+        SELECT i1, i2
+        FROM reportes
+        WHERE grd_id = %s AND fecha < %s
+        ORDER BY fecha DESC
+        LIMIT 1;
+        """
+        first_ts = historial_data[0]['timestamp']
+        cursor.execute(seed_query, (grd_id, first_ts))
+        seed_row = cursor.fetchone() or {}
+
         # 3. Combinar los datos: Iterar sobre historial y asignar el último estado de bomba conocido (FIX para bombas)
         combined_data = []
         reporte_index = 0
-        current_bombas = {'i1': None, 'i2': None}
+        current_bombas = {
+            'i1': seed_row.get('i1') if seed_row else None,
+            'i2': seed_row.get('i2') if seed_row else None
+        }
 
         for h_row in historial_data:
             h_timestamp = h_row['timestamp']
@@ -253,8 +279,8 @@ def get_historial_data():
             presion_convertida = convert_raw_to_pressure(grd_id, h_row['presion_raw'])
             
             # Usamos la conversión robusta para asegurar que los valores 1/0 de la BD funcionen
-            bomba1_status = 'Encendida' if current_bombas.get('i1') and int(current_bombas.get('i1')) == 1 else 'Apagada'
-            bomba2_status = 'Encendida' if current_bombas.get('i2') and int(current_bombas.get('i2')) == 1 else 'Apagada'
+            bomba1_status = 'Encendida' if is_bomba_on(current_bombas.get('i1')) else 'Apagada'
+            bomba2_status = 'Encendida' if is_bomba_on(current_bombas.get('i2')) else 'Apagada'
 
             combined_data.append({
                 'grd_id': grd_id,
