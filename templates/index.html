@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo de Cisternas</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <header>
+        <h1>Monitoreo de Cisternas</h1>
+        <div class="filter-container">
+            <label for="zone-select">Seleccionar Zona:</label>
+            <select id="zone-select">
+                <option value="all">Todas</option>
+            </select>
+            <label for="grd-select" style="display:none;">Seleccionar GRD:</label>
+            <select id="grd-select" style="display:none;">
+                <option value="all">Todos</option>
+            </select>
+        </div>
+    </header>
+
+    <main>
+        <div id="map"></div>
+        <div id="info-panel" class="hidden">
+            <button id="close-panel-btn">X</button>
+            <h2 id="panel-title"></h2>
+            <div id="panel-content">
+                </div>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

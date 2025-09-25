@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historial de GRDs</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* Estilos específicos para la página de historial */
+        .filter-form {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .filter-form select,
+        .filter-form input[type="date"],
+        .filter-form button {
+            padding: 8px;
+            margin: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .historical-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .historical-table th,
+        .historical-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .historical-table th {
+            background-color: #f2f2f2;
+        }
+        
+        /* Aseguramos que los contenedores del historial tengan espacio */
+        #historicalChart {
+            max-height: 400px; /* Altura máxima para la gráfica */
+            margin-bottom: 20px;
+        }
+        
+        #historical-table-container {
+            overflow-x: auto; /* Permite desplazamiento horizontal en tablas grandes */
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Historial de GRDs</h1>
+        <a href="/">Volver al Monitoreo en Vivo</a>
+    </header>
+
+    <main>
+        <div class="filter-form">
+            <label for="grd-select">Seleccionar GRD:</label>
+            <select id="grd-select"></select>
+
+            <label for="start-date">Fecha de inicio:</label>
+            <input type="date" id="start-date">
+
+            <label for="end-date">Fecha de fin:</label>
+            <input type="date" id="end-date">
+            
+            <button id="search-button">Buscar</button>
+        </div>
+
+        <div id="historial-container">
+            <canvas id="historicalChart"></canvas> 
+            
+            <div id="historical-table-container">
+                <p>Selecciona un GRD y un rango de fechas para ver el historial.</p>
+            </div>
+        </div>
+        </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/js/historial.js"></script>
+</body>
+</html>
