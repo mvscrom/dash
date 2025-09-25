@@ -64,8 +64,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
+            // Calcular y mostrar estadísticas de bombas
+            const stats = calculateBombaStats(data);
+            const statsHTML = renderBombaStats(stats);
+
             renderHistoricalChart(data);
             renderHistoricalTable(data);
+
+            // Insertar estadísticas antes de la tabla
+            const tableContainer = document.getElementById('historical-table-container');
+            tableContainer.insertAdjacentHTML('beforebegin', statsHTML);
             
         } catch (error) {
             console.error('Error al cargar el historial:', error);
@@ -198,6 +206,65 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function calculateBombaStats(data) {
+        if (!data || data.length === 0) return null;
+
+        const stats = {
+            bomba1: { encendida: 0, apagada: 0, cambios: 0 },
+            bomba2: { encendida: 0, apagada: 0, cambios: 0 }
+        };
+
+        let previousBomba1 = null;
+        let previousBomba2 = null;
+
+        data.forEach(item => {
+            const b1 = item.estado_bomba_1;
+            const b2 = item.estado_bomba_2;
+
+            // Contar tiempo encendido/apagado (simplificado)
+            if (b1 === 'Encendida') stats.bomba1.encendida++;
+            else if (b1 === 'Apagada') stats.bomba1.apagada++;
+
+            if (b2 === 'Encendida') stats.bomba2.encendida++;
+            else if (b2 === 'Apagada') stats.bomba2.apagada++;
+
+            // Contar cambios
+            if (previousBomba1 !== null && previousBomba1 !== b1) stats.bomba1.cambios++;
+            if (previousBomba2 !== null && previousBomba2 !== b2) stats.bomba2.cambios++;
+
+            previousBomba1 = b1;
+            previousBomba2 = b2;
+        });
+
+        return stats;
+    }
+
+    function renderBombaStats(stats) {
+        if (!stats) return '';
+
+        const totalRecords = stats.bomba1.encendida + stats.bomba1.apagada;
+        const bomba1Uptime = totalRecords > 0 ? (stats.bomba1.encendida / totalRecords * 100).toFixed(1) : 0;
+        const bomba2Uptime = totalRecords > 0 ? (stats.bomba2.encendida / totalRecords * 100).toFixed(1) : 0;
+
+        return `
+            <div class="bomba-stats" style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                <h3>Estadísticas de Bombas</h3>
+                <div style="display: flex; gap: 20px;">
+                    <div>
+                        <h4>Bomba 1</h4>
+                        <p>Tiempo encendida: ${bomba1Uptime}%</p>
+                        <p>Cambios de estado: ${stats.bomba1.cambios}</p>
+                    </div>
+                    <div>
+                        <h4>Bomba 2</h4>
+                        <p>Tiempo encendida: ${bomba2Uptime}%</p>
+                        <p>Cambios de estado: ${stats.bomba2.cambios}</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     function renderHistoricalTable(data) {
         let tableHTML = `
             <table class="historical-table">
@@ -209,23 +276,65 @@ document.addEventListener('DOMContentLoaded', () => {
                         <th>Presión (bar)</th>
                         <th>Bomba 1</th>
                         <th>Bomba 2</th>
+                        <th>Eventos</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
+
+        // Crear un mapa de eventos por timestamp para acceso rápido
+        const eventsMap = {};
         data.forEach(item => {
+            if (item.eventos && item.eventos.length > 0) {
+                eventsMap[item.timestamp] = item.eventos;
+            }
+        });
+
+        data.forEach(item => {
+            const eventos = eventsMap[item.timestamp] || [];
+            const eventosText = eventos.map(e =>
+                `${e.bomba}: ${e.estado_anterior} → ${e.estado_nuevo}`
+            ).join('; ');
+
+            const hasEvents = eventos.length > 0;
+            const rowClass = hasEvents ? 'event-row' : '';
+
             tableHTML += `
-                <tr>
+                <tr class="${rowClass}">
                     <td>${item.timestamp}</td>
                     <td>${item.nivel_agua.metros !== undefined ? item.nivel_agua.metros.toFixed(2) : '--'}</td>
                     <td>${item.nivel_agua.porcentaje !== undefined ? item.nivel_agua.porcentaje.toFixed(2) : '--'}</td>
                     <td>${item.presion !== undefined ? item.presion.toFixed(2) : '--'}</td>
-                    <td>${item.estado_bomba_1 || '--'}</td>
-                    <td>${item.estado_bomba_2 || '--'}</td>
+                    <td class="bomba-status ${item.estado_bomba_1.toLowerCase()}">${item.estado_bomba_1 || '--'}</td>
+                    <td class="bomba-status ${item.estado_bomba_2.toLowerCase()}">${item.estado_bomba_2 || '--'}</td>
+                    <td class="eventos-cell">${eventosText || '-'}</td>
                 </tr>
             `;
         });
         tableHTML += `</tbody></table>`;
+
+        // Agregar estilos CSS para los eventos
+        const style = document.createElement('style');
+        style.textContent = `
+            .event-row {
+                background-color: #fff3cd !important;
+                border-left: 4px solid #ffc107;
+            }
+            .bomba-status.encendida {
+                color: #28a745;
+                font-weight: bold;
+            }
+            .bomba-status.apagada {
+                color: #dc3545;
+                font-weight: bold;
+            }
+            .eventos-cell {
+                font-size: 0.9em;
+                color: #856404;
+            }
+        `;
+        document.head.appendChild(style);
+
         historicalTableContainer.innerHTML = tableHTML;
     }
 
