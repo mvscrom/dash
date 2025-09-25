@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico de Bombas</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .diagnostico-container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .filter-form {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .filter-form select,
+        .filter-form button {
+            padding: 10px;
+            margin: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .diagnostico-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .diagnostico-table th,
+        .diagnostico-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .diagnostico-table th {
+            background-color: #f2f2f2;
+        }
+        .historial-row {
+            background-color: #e8f4fd;
+        }
+        .reportes-row {
+            background-color: #fff2e8;
+        }
+        .encendida {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .apagada {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .info {
+            color: #0c5460;
+            background-color: #d1ecf1;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔧 Diagnóstico de Sincronización de Bombas</h1>
+        <a href="/">← Volver al Monitoreo en Vivo</a>
+        <a href="/historial">← Ir al Historial</a>
+    </header>
+
+    <main class="diagnostico-container">
+        <div class="info">
+            <strong>ℹ️ Información:</strong> Esta herramienta te ayuda a diagnosticar por qué las bombas aparecen apagadas en el historial cuando deberían estar encendidas. Compara los datos de las tablas 'historial' y 'reportes' para identificar problemas de sincronización.
+        </div>
+
+        <div class="filter-form">
+            <label for="grd-select">Seleccionar GRD:</label>
+            <select id="grd-select">
+                <option value="720">GRD 720 (Tanque LG)</option>
+                <option value="787">GRD 787 (Planta LG)</option>
+            </select>
+            
+            <button id="diagnostico-button">🔍 Ejecutar Diagnóstico</button>
+            <button id="limpiar-button">🧹 Limpiar</button>
+        </div>
+
+        <div id="resultado-container">
+            <p>Selecciona un GRD y haz clic en "Ejecutar Diagnóstico" para analizar la sincronización de datos.</p>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const grdSelect = document.getElementById('grd-select');
+            const diagnosticoButton = document.getElementById('diagnostico-button');
+            const limpiarButton = document.getElementById('limpiar-button');
+            const resultadoContainer = document.getElementById('resultado-container');
+
+            async function ejecutarDiagnostico() {
+                const grdId = grdSelect.value;
+                
+                if (!grdId) {
+                    alert('Por favor, selecciona un GRD.');
+                    return;
+                }
+
+                resultadoContainer.innerHTML = '<p>🔄 Ejecutando diagnóstico...</p>';
+
+                try {
+                    const response = await fetch(`/api/diagnostico_bombas?grd_id=${grdId}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        resultadoContainer.innerHTML = `<div class="error">❌ Error: ${data.error}</div>`;
+                        return;
+                    }
+                    
+                    renderizarDiagnostico(data);
+                    
+                } catch (error) {
+                    console.error('Error en diagnóstico:', error);
+                    resultadoContainer.innerHTML = `<div class="error">❌ Error al ejecutar diagnóstico: ${error.message}</div>`;
+                }
+            }
+
+            function renderizarDiagnostico(data) {
+                let html = `
+                    <div class="info">
+                        <strong>📊 Diagnóstico para GRD ${data.grd_id}</strong><br>
+                        <strong>🕐 Timestamp de consulta:</strong> ${data.timestamp_consulta}<br>
+                        <strong>📈 Total de registros analizados:</strong> ${data.datos.length}
+                    </div>
+                `;
+
+                if (data.datos.length === 0) {
+                    html += '<div class="error">⚠️ No se encontraron datos para el análisis.</div>';
+                    resultadoContainer.innerHTML = html;
+                    return;
+                }
+
+                html += `
+                    <table class="diagnostico-table">
+                        <thead>
+                            <tr>
+                                <th>Tabla</th>
+                                <th>Fecha/Hora</th>
+                                <th>Tipo</th>
+                                <th>Datos</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.datos.forEach(item => {
+                    const rowClass = item.tabla === 'historial' ? 'historial-row' : 'reportes-row';
+                    
+                    if (item.tabla === 'historial') {
+                        html += `
+                            <tr class="${rowClass}">
+                                <td>📊 ${item.tabla}</td>
+                                <td>${item.fecha}</td>
+                                <td>Nivel de Agua</td>
+                                <td>
+                                    <strong>RAW:</strong> ${item.nivel_raw}<br>
+                                    <strong>Metros:</strong> ${item.nivel_convertido.metros}m<br>
+                                    <strong>Porcentaje:</strong> ${item.nivel_convertido.porcentaje}%<br>
+                                    <strong>Estado:</strong> ${item.nivel_convertido.estado}
+                                </td>
+                            </tr>
+                        `;
+                    } else {
+                        const bomba1Class = item.bomba1 === 'Encendida' ? 'encendida' : 'apagada';
+                        const bomba2Class = item.bomba2 === 'Encendida' ? 'encendida' : 'apagada';
+                        
+                        html += `
+                            <tr class="${rowClass}">
+                                <td>🔧 ${item.tabla}</td>
+                                <td>${item.fecha}</td>
+                                <td>Estado de Bombas</td>
+                                <td>
+                                    <strong>Bomba 1:</strong> <span class="${bomba1Class}">${item.bomba1}</span> (RAW: ${item.i1_raw})<br>
+                                    <strong>Bomba 2:</strong> <span class="${bomba2Class}">${item.bomba2}</span> (RAW: ${item.i2_raw})
+                                </td>
+                            </tr>
+                        `;
+                    }
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+
+                // Agregar análisis de sincronización
+                html += generarAnalisisSincronizacion(data);
+
+                resultadoContainer.innerHTML = html;
+            }
+
+            function generarAnalisisSincronizacion(data) {
+                const historialCount = data.datos.filter(d => d.tabla === 'historial').length;
+                const reportesCount = data.datos.filter(d => d.tabla === 'reportes').length;
+                
+                let analisis = `
+                    <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px;">
+                        <h3>📋 Análisis de Sincronización</h3>
+                        <ul>
+                            <li><strong>Registros de historial:</strong> ${historialCount}</li>
+                            <li><strong>Registros de reportes:</strong> ${reportesCount}</li>
+                            <li><strong>Ratio historial/reportes:</strong> ${reportesCount > 0 ? (historialCount / reportesCount).toFixed(2) : 'N/A'}</li>
+                        </ul>
+                `;
+
+                if (reportesCount === 0) {
+                    analisis += `
+                        <div class="error">
+                            <strong>🚨 PROBLEMA IDENTIFICADO:</strong> No hay datos de reportes (bombas) en las últimas 2 horas. 
+                            Esto explica por qué las bombas aparecen apagadas en el historial.
+                        </div>
+                    `;
+                } else if (historialCount > reportesCount * 3) {
+                    analisis += `
+                        <div class="error">
+                            <strong>⚠️ POSIBLE PROBLEMA:</strong> Los datos de historial son mucho más frecuentes que los de reportes. 
+                            Esto puede causar que muchos registros de historial no tengan estado de bomba correspondiente.
+                        </div>
+                    `;
+                } else {
+                    analisis += `
+                        <div class="info">
+                            <strong>✅ SINCRONIZACIÓN ADECUADA:</strong> La frecuencia de datos parece estar bien balanceada.
+                        </div>
+                    `;
+                }
+
+                analisis += `
+                        <h4>💡 Recomendaciones:</h4>
+                        <ul>
+                            <li>Verificar que el middleware esté enviando datos de bombas con la misma frecuencia que los datos de nivel</li>
+                            <li>Revisar la configuración de envío de datos del equipo GRD</li>
+                            <li>Considerar implementar un sistema de interpolación para estados de bomba</li>
+                        </ul>
+                    </div>
+                `;
+
+                return analisis;
+            }
+
+            function limpiarResultados() {
+                resultadoContainer.innerHTML = '<p>Selecciona un GRD y haz clic en "Ejecutar Diagnóstico" para analizar la sincronización de datos.</p>';
+            }
+
+            diagnosticoButton.addEventListener('click', ejecutarDiagnostico);
+            limpiarButton.addEventListener('click', limpiarResultados);
+        });
+    </script>
+</body>
+</html>

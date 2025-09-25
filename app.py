@@ -234,27 +234,55 @@ def get_historial_data():
         cursor.execute(reportes_query, (grd_id, start_date, end_date_time))
         reportes_data = cursor.fetchall()
 
-        # 3. Combinar los datos: Iterar sobre historial y asignar el último estado de bomba conocido (FIX para bombas)
+        # 3. Combinar los datos: Mejorar sincronización de bombas
         combined_data = []
-        reporte_index = 0
-        current_bombas = {'i1': None, 'i2': None}
+        
+        # Crear un diccionario de reportes por timestamp para acceso más eficiente
+        reportes_dict = {}
+        for reporte in reportes_data:
+            reportes_dict[reporte['fecha']] = reporte
+        
+        # Obtener el estado más reciente de bombas antes del rango de fechas
+        estado_inicial_bombas = {'i1': None, 'i2': None}
+        if reportes_data:
+            # Buscar el último reporte antes del inicio del rango
+            cursor.execute("""
+                SELECT i1, i2 FROM reportes 
+                WHERE grd_id = %s AND fecha < %s 
+                ORDER BY fecha DESC LIMIT 1
+            """, (grd_id, start_date))
+            estado_anterior = cursor.fetchone()
+            if estado_anterior:
+                estado_inicial_bombas = {'i1': estado_anterior[0], 'i2': estado_anterior[1]}
+
+        current_bombas = estado_inicial_bombas.copy()
 
         for h_row in historial_data:
             h_timestamp = h_row['timestamp']
             
-            # Avanzar en los reportes hasta encontrar el más reciente antes o igual a h_timestamp
-            # En MySQL, la columna 'fecha' del reporte se compara con el 'timestamp' del historial
-            while reporte_index < len(reportes_data) and reportes_data[reporte_index]['fecha'] <= h_timestamp:
-                current_bombas['i1'] = reportes_data[reporte_index]['i1']
-                current_bombas['i2'] = reportes_data[reporte_index]['i2']
-                reporte_index += 1
+            # Buscar el reporte más cercano (antes o igual al timestamp actual)
+            # Usar una ventana de tiempo más amplia para encontrar el estado de bomba más relevante
+            reporte_cercano = None
+            min_diff = float('inf')
+            
+            for reporte_fecha, reporte_data in reportes_dict.items():
+                if reporte_fecha <= h_timestamp:
+                    diff = (h_timestamp - reporte_fecha).total_seconds()
+                    if diff < min_diff:
+                        min_diff = diff
+                        reporte_cercano = reporte_data
+            
+            # Si encontramos un reporte cercano (dentro de 10 minutos), usarlo
+            if reporte_cercano and min_diff <= 600:  # 10 minutos = 600 segundos
+                current_bombas['i1'] = reporte_cercano['i1']
+                current_bombas['i2'] = reporte_cercano['i2']
             
             nivel_convertido = convert_raw_to_level(grd_id, h_row['nivel_agua_raw'])
             presion_convertida = convert_raw_to_pressure(grd_id, h_row['presion_raw'])
             
-            # Usamos la conversión robusta para asegurar que los valores 1/0 de la BD funcionen
-            bomba1_status = 'Encendida' if current_bombas.get('i1') and int(current_bombas.get('i1')) == 1 else 'Apagada'
-            bomba2_status = 'Encendida' if current_bombas.get('i2') and int(current_bombas.get('i2')) == 1 else 'Apagada'
+            # Conversión mejorada con mejor manejo de valores None
+            bomba1_status = 'Encendida' if current_bombas.get('i1') is not None and int(current_bombas.get('i1')) == 1 else 'Apagada'
+            bomba2_status = 'Encendida' if current_bombas.get('i2') is not None and int(current_bombas.get('i2')) == 1 else 'Apagada'
 
             combined_data.append({
                 'grd_id': grd_id,
@@ -277,6 +305,91 @@ def get_historial_data():
 @app.route('/tank/<int:grd_id>')
 def tank_detail(grd_id):
     return render_template('tank.html')
+
+@app.route('/diagnostico')
+def diagnostico_page():
+    return render_template('diagnostico.html')
+
+@app.route('/api/diagnostico_bombas')
+def diagnostico_bombas():
+    """Endpoint para diagnosticar el estado de sincronización de las bombas."""
+    grd_id = int(request.args.get('grd_id', 720))
+    
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"error": "No se pudo conectar a la base de datos"}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Obtener datos de las últimas 2 horas
+        diagnostico_query = """
+        SELECT 
+            'historial' as tabla,
+            grd_id,
+            timestamp as fecha,
+            NULL as i1,
+            NULL as i2,
+            direccion,
+            valor
+        FROM historial 
+        WHERE grd_id = %s 
+            AND timestamp >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+            AND direccion = 2
+        UNION ALL
+        SELECT 
+            'reportes' as tabla,
+            grd_id,
+            fecha,
+            i1,
+            i2,
+            NULL as direccion,
+            NULL as valor
+        FROM reportes 
+        WHERE grd_id = %s 
+            AND fecha >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+        ORDER BY fecha DESC
+        LIMIT 50;
+        """
+        
+        cursor.execute(diagnostico_query, (grd_id, grd_id))
+        datos = cursor.fetchall()
+        
+        # Procesar datos para mostrar sincronización
+        resultado = {
+            'grd_id': grd_id,
+            'timestamp_consulta': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'datos': []
+        }
+        
+        for row in datos:
+            if row['tabla'] == 'historial':
+                resultado['datos'].append({
+                    'tabla': 'historial',
+                    'fecha': row['fecha'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'nivel_raw': row['valor'],
+                    'nivel_convertido': convert_raw_to_level(grd_id, row['valor'])
+                })
+            else:  # reportes
+                bomba1 = 'Encendida' if row['i1'] == 1 else 'Apagada'
+                bomba2 = 'Encendida' if row['i2'] == 1 else 'Apagada'
+                resultado['datos'].append({
+                    'tabla': 'reportes',
+                    'fecha': row['fecha'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'bomba1': bomba1,
+                    'bomba2': bomba2,
+                    'i1_raw': row['i1'],
+                    'i2_raw': row['i2']
+                })
+        
+        return jsonify(resultado)
+        
+    except mysql.connector.Error as err:
+        print(f"Error en diagnóstico: {err}")
+        return jsonify({"error": "Error interno del servidor"}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == '__main__':
     app.run(debug=True)
